@@ -13,9 +13,39 @@ logger = logging.getLogger(__name__)
 class MT5Client:
     """MT5 trading client with connection management and trading operations"""
 
+    # Class-level variable to store supported filling mode
+    _supported_filling_mode = None
+
     def __init__(self):
         self.connected = False
         self.account_info: Optional[Dict] = None
+
+    def _get_supported_filling_mode(self, symbol: str) -> int:
+        """Get the supported filling mode for the symbol"""
+        if MT5Client._supported_filling_mode is not None:
+            return MT5Client._supported_filling_mode
+
+        # Try to get from symbol info
+        info = mt5.symbol_info(symbol)
+        if info is not None:
+            # Check if trade_filling_mode attribute exists (newer MT5 Python versions)
+            if hasattr(info, 'filling_mode'):
+                filling_mode = info.filling_mode
+                if filling_mode & (1 << mt5.ORDER_FILLING_FOK):
+                    MT5Client._supported_filling_mode = mt5.ORDER_FILLING_FOK
+                elif filling_mode & (1 << mt5.ORDER_FILLING_RETURN):
+                    MT5Client._supported_filling_mode = mt5.ORDER_FILLING_RETURN
+                elif filling_mode & (1 << mt5.ORDER_FILLING_IOC):
+                    MT5Client._supported_filling_mode = mt5.ORDER_FILLING_IOC
+                else:
+                    MT5Client._supported_filling_mode = mt5.ORDER_FILLING_FOK
+                logger.info(f"Supported filling mode from symbol: {MT5Client._supported_filling_mode}")
+                return MT5Client._supported_filling_mode
+
+        # Fallback: try RETURN mode first (widely supported), then FOK
+        MT5Client._supported_filling_mode = mt5.ORDER_FILLING_RETURN
+        logger.info(f"Using fallback filling mode: {MT5Client._supported_filling_mode}")
+        return MT5Client._supported_filling_mode
 
     def connect(self) -> bool:
         """Initialize MT5 connection"""
@@ -169,19 +199,24 @@ class MT5Client:
                 return {"success": False, "error": f"Volume {volume} exceeds maximum {symbol_info['volume_max']}"}
 
         # Prepare request
+        filling_mode = self._get_supported_filling_mode(symbol)
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
             "symbol": symbol,
             "volume": volume,
             "type": mt5.ORDER_TYPE_BUY,
             "price": price_info["ask"],
-            "sl": stop_loss if stop_loss else 0,
-            "tp": take_profit if take_profit else 0,
             "deviation": Config.DEFAULT_SLIPPAGE,
             "magic": magic if magic else Config.DEFAULT_MAGIC_NUMBER,
             "comment": comment or "TV Signal",
-            "type_filling": mt5.ORDER_FILLING_FOK,
+            "type_filling": filling_mode,
         }
+
+        # Only add SL/TP if provided
+        if stop_loss is not None and stop_loss > 0:
+            request["sl"] = stop_loss
+        if take_profit is not None and take_profit > 0:
+            request["tp"] = take_profit
 
         logger.info(f"BUY {symbol}: volume={volume}, price={price_info['ask']}")
         result = mt5.order_send(request)
@@ -220,19 +255,24 @@ class MT5Client:
                 return {"success": False, "error": f"Volume {volume} exceeds maximum {symbol_info['volume_max']}"}
 
         # Prepare request
+        filling_mode = self._get_supported_filling_mode(symbol)
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
             "symbol": symbol,
             "volume": volume,
             "type": mt5.ORDER_TYPE_SELL,
             "price": price_info["bid"],
-            "sl": stop_loss if stop_loss else 0,
-            "tp": take_profit if take_profit else 0,
             "deviation": Config.DEFAULT_SLIPPAGE,
             "magic": magic if magic else Config.DEFAULT_MAGIC_NUMBER,
             "comment": comment or "TV Signal",
-            "type_filling": mt5.ORDER_FILLING_FOK,
+            "type_filling": filling_mode,
         }
+
+        # Only add SL/TP if provided
+        if stop_loss is not None and stop_loss > 0:
+            request["sl"] = stop_loss
+        if take_profit is not None and take_profit > 0:
+            request["tp"] = take_profit
 
         logger.info(f"SELL {symbol}: volume={volume}, price={price_info['bid']}")
         result = mt5.order_send(request)
@@ -261,7 +301,7 @@ class MT5Client:
             "deviation": Config.DEFAULT_SLIPPAGE,
             "magic": position["magic"],
             "comment": "Closed by TV Signal",
-            "type_filling": mt5.ORDER_FILLING_FOK,
+            "type_filling": self._get_supported_filling_mode(position["symbol"]),
         }
 
         logger.info(f"CLOSE position {ticket}: {position['symbol']} {close_volume} lots")

@@ -3,7 +3,7 @@ TradingView Signal Parser - Parses and validates TradingView webhook alerts
 """
 import logging
 import re
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 from dataclasses import dataclass
 from config import Config
 
@@ -84,7 +84,11 @@ class TradingViewParser:
 
         # Extract optional fields
         comment = str(normalized.get("comment", "") or "")
-        order_type = str(normalized.get("type") or normalized.get("ordertype") or "market").lower()
+        order_type = (normalized.get("type") or normalized.get("ordertype") or "market")
+        if order_type:
+            order_type = str(order_type).lower()
+        else:
+            order_type = "market"
 
         return TradingSignal(
             action=action,
@@ -150,7 +154,10 @@ class TradingViewParser:
         if not action_field:
             return None
 
-        action_str = str(action_field).lower()
+        try:
+            action_str = str(action_field).lower()
+        except (ValueError, TypeError):
+            return None
 
         for keyword in self.close_keywords:
             if keyword.lower() in action_str:
@@ -169,12 +176,21 @@ class TradingViewParser:
     def _extract_symbol(self, data: Dict[str, Any]) -> Optional[str]:
         """Extract trading symbol from data"""
         # Try common field names
-        symbol_field = data.get("symbol") or data.get("ticker") or data.get("s") or data.get("sym")
+        raw_symbol = data.get("symbol") or data.get("ticker") or data.get("s") or data.get("sym")
 
-        if not symbol_field:
+        # Handle None or empty values
+        if not raw_symbol:
             return None
 
-        symbol = str(symbol_field).upper().strip()
+        # Convert to string and normalize
+        try:
+            symbol = str(raw_symbol).upper().strip()
+        except (ValueError, TypeError):
+            logger.warning(f"Invalid symbol value: {raw_symbol}")
+            return None
+
+        if not symbol or symbol == "NONE":
+            return None
 
         # Check if symbol exists in our mapping
         if symbol in self.symbols:
@@ -221,14 +237,16 @@ class TradingViewParser:
         """Extract volume/lot size from data"""
         volume_field = data.get("volume") or data.get("lotsize") or data.get("lot") or data.get("v") or data.get("q")
 
-        if volume_field:
-            try:
-                volume = float(volume_field)
-                return min(volume, Config.MAX_LOT_SIZE)  # Cap at max lot
-            except (ValueError, TypeError):
-                pass
+        if volume_field is None:
+            return Config.DEFAULT_LOT
 
-        return Config.DEFAULT_LOT
+        try:
+            volume = float(volume_field)
+            if volume <= 0:
+                return Config.DEFAULT_LOT
+            return min(volume, Config.MAX_LOT_SIZE)  # Cap at max lot
+        except (ValueError, TypeError):
+            return Config.DEFAULT_LOT
 
     def _extract_volume_from_text(self, text: str) -> float:
         """Extract volume from plain text"""
@@ -277,7 +295,7 @@ class TradingViewParser:
 
         return None
 
-    def validate_signal(self, signal: TradingSignal) -> tuple[bool, Optional[str]]:
+    def validate_signal(self, signal: TradingSignal) -> Tuple[bool, Optional[str]]:
         """Validate a parsed signal"""
         if not signal.action:
             return False, "Missing action"

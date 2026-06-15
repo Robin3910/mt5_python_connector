@@ -1,7 +1,7 @@
 # MT5 Python Connector
 # Required dependencies for TradingView to MT5 signal forwarding
 
-flask==3.0.0
-meta-trader-5==5.0.45
-python-dotenv==1.0.0
-gunicorn==21.2.0
+flask
+MetaTrader5
+python-dotenv
+
