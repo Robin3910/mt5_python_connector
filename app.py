@@ -139,6 +139,17 @@ def execute_trade(signal):
             return {"success": False, "error": "Failed to connect to MT5"}
 
     try:
+        # Check for existing positions before opening new ones
+        if signal.action in ("BUY", "SELL"):
+            existing_positions = mt5_client.get_positions(signal.symbol)
+            if existing_positions:
+                logger.warning(f"Position already exists for {signal.symbol}, skipping {signal.action}")
+                return {
+                    "success": False,
+                    "error": f"Position already exists for {signal.symbol}. Close existing position first.",
+                    "existing_positions": existing_positions,
+                }
+
         if signal.action == "BUY":
             return mt5_client.buy(
                 symbol=signal.symbol,
