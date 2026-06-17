@@ -20,6 +20,7 @@ class TradingSignal:
     take_profit: Optional[float] = None
     order_type: Optional[str] = None  # market, limit, stop
     comment: str = ""
+    allow_position: bool = False  # allow opening position when one already exists
 
 
 class TradingViewParser:
@@ -89,6 +90,7 @@ class TradingViewParser:
             order_type = str(order_type).lower()
         else:
             order_type = "market"
+        allow_position = self._extract_allow_position(normalized)
 
         return TradingSignal(
             action=action,
@@ -98,6 +100,7 @@ class TradingViewParser:
             take_profit=take_profit,
             order_type=order_type,
             comment=comment,
+            allow_position=allow_position,
         )
 
     def _parse_text(self, text: str) -> Optional[TradingSignal]:
@@ -294,6 +297,18 @@ class TradingViewParser:
                     continue
 
         return None
+
+    def _extract_allow_position(self, data: Dict[str, Any]) -> bool:
+        """Extract allow_position flag from data"""
+        value = data.get("allow_position") or data.get("allowPosition") or data.get("position_allowed")
+
+        if value is None:
+            return False
+
+        try:
+            return bool(int(value)) == 1
+        except (ValueError, TypeError):
+            return False
 
     def validate_signal(self, signal: TradingSignal) -> Tuple[bool, Optional[str]]:
         """Validate a parsed signal"""

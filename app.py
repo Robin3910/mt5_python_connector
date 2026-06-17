@@ -140,7 +140,7 @@ def execute_trade(signal):
 
     try:
         # Check for existing positions before opening new ones
-        if signal.action in ("BUY", "SELL"):
+        if signal.action in ("BUY", "SELL") and not getattr(signal, "allow_position", False):
             existing_positions = mt5_client.get_positions(signal.symbol)
             if existing_positions:
                 logger.warning(f"Position already exists for {signal.symbol}, skipping {signal.action}")
