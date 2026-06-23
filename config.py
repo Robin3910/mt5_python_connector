@@ -29,6 +29,10 @@ class Config:
     AUTH_TOKEN = os.getenv("AUTH_TOKEN", "")  # Optional: for webhook authentication
     ENABLE_AUTH = os.getenv("ENABLE_AUTH", "False").lower() == "true"
 
+    # IP Whitelist (comma-separated IP addresses allowed to access the webhook)
+    WHITELISTED_IPS = [ip.strip() for ip in os.getenv("WHITELISTED_IPS", "").split(",") if ip.strip()]
+    ENABLE_IP_WHITELIST = os.getenv("ENABLE_IP_WHITELIST", "False").lower() == "true"
+
     # Logging
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
     LOG_FILE = os.getenv("LOG_FILE", "trading.log")

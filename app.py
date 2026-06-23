@@ -46,6 +46,30 @@ def verify_auth():
     return False
 
 
+def verify_ip():
+    """Verify request IP is in whitelist if enabled"""
+    if not Config.ENABLE_IP_WHITELIST:
+        return True
+
+    if not Config.WHITELISTED_IPS:
+        logger.warning("IP whitelist is enabled but no IPs are configured")
+        return False
+
+    client_ip = request.remote_addr
+
+    # Handle X-Forwarded-For header (when behind proxy/load balancer)
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        # X-Forwarded-For can contain multiple IPs, take the first one (original client)
+        client_ip = forwarded_for.split(",")[0].strip()
+
+    if client_ip in Config.WHITELISTED_IPS:
+        return True
+
+    logger.warning(f"IP {client_ip} not in whitelist. Whitelisted: {Config.WHITELISTED_IPS}")
+    return False
+
+
 @app.route("/health", methods=["GET"])
 def health_check():
     """Health check endpoint"""
@@ -78,6 +102,11 @@ def webhook():
     if not verify_auth():
         logger.warning("Unauthorized webhook attempt")
         return jsonify({"error": "Unauthorized"}), 401
+
+    # Verify IP whitelist
+    if not verify_ip():
+        logger.warning(f"Forbidden IP attempt from {request.remote_addr}")
+        return jsonify({"error": "Forbidden"}), 403
 
     # Parse request data
     try:

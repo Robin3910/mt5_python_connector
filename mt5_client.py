@@ -88,6 +88,58 @@ class MT5Client:
         """Check if MT5 is connected"""
         return self.connected and mt5.terminal_info() is not None
 
+    def resolve_symbol(self, symbol: str) -> Optional[str]:
+        """Resolve symbol name to actual MT5 symbol.
+        
+        Handles cases where TradingView uses 'XAUUSD' but MT5 has 'XAUUSD.m' or 'XAUUSD+'.
+        """
+        if not self.is_connected():
+            return symbol
+
+        # First, try exact match (case-insensitive)
+        all_symbols = mt5.symbols_get()
+        if all_symbols is None:
+            logger.warning("Failed to get symbols list from MT5")
+            return symbol
+
+        # Build a case-insensitive lookup map
+        symbol_map = {}
+        for s in all_symbols:
+            name_upper = s.name.upper()
+            if name_upper not in symbol_map:
+                symbol_map[name_upper] = s.name
+
+        # Try exact match first
+        symbol_upper = symbol.upper()
+        if symbol_upper in symbol_map:
+            resolved = symbol_map[symbol_upper]
+            if resolved != symbol:
+                logger.info(f"Resolved symbol '{symbol}' -> '{resolved}' (exact match)")
+            return resolved
+
+        # Try partial match: find symbols that start with the input
+        # e.g., 'xauusd' matches 'xauusd.m', 'xauusd+'
+        partial_matches = []
+        for name_upper, actual_name in symbol_map.items():
+            if name_upper.startswith(symbol_upper) or name_upper.replace(".", "").replace("+", "").startswith(symbol_upper):
+                partial_matches.append(actual_name)
+
+        if partial_matches:
+            if len(partial_matches) == 1:
+                resolved = partial_matches[0]
+                logger.info(f"Resolved symbol '{symbol}' -> '{resolved}' (partial match)")
+                return resolved
+            else:
+                # Multiple matches, prefer shorter names without suffixes
+                # Sort by length and pick the shortest (usually the base symbol)
+                partial_matches.sort(key=len)
+                resolved = partial_matches[0]
+                logger.info(f"Resolved symbol '{symbol}' -> '{resolved}' (selected from {partial_matches})")
+                return resolved
+
+        logger.warning(f"Could not resolve symbol '{symbol}' in MT5")
+        return symbol
+
     def get_symbol_info(self, symbol: str) -> Optional[Dict[str, Any]]:
         """Get symbol information"""
         if not self.is_connected():
@@ -127,7 +179,10 @@ class MT5Client:
         if not self.is_connected():
             return []
 
-        positions = mt5.positions_get(symbol=symbol) if symbol else mt5.positions_get()
+        # Resolve symbol before querying positions
+        query_symbol = self.resolve_symbol(symbol) if symbol else symbol
+
+        positions = mt5.positions_get(symbol=query_symbol) if query_symbol else mt5.positions_get()
         if positions is None:
             return []
 
@@ -179,6 +234,9 @@ class MT5Client:
         """Open BUY position"""
         if not self.is_connected():
             return {"success": False, "error": "MT5 not connected"}
+
+        # Resolve symbol name to actual MT5 symbol
+        symbol = self.resolve_symbol(symbol)
 
         # Validate symbol
         if not mt5.symbol_select(symbol, True):
@@ -235,6 +293,9 @@ class MT5Client:
         """Open SELL position"""
         if not self.is_connected():
             return {"success": False, "error": "MT5 not connected"}
+
+        # Resolve symbol name to actual MT5 symbol
+        symbol = self.resolve_symbol(symbol)
 
         # Validate symbol
         if not mt5.symbol_select(symbol, True):
